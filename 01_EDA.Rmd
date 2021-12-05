@@ -1,0 +1,193 @@
+---
+title: "01_EDA"
+author: "Suvendu K. Pati"
+date: "03/12/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(fpp3)
+library(dplyr)
+library(tsibble)
+library(lubridate)
+library(ggplot2)
+```
+
+## Importing datasets
+```{r}
+calendar <- read.csv("calendar_afcs2021.csv")
+train <- read.csv("sales_train_validation_afcs2021.csv")
+test <- read.csv("sales_test_validation_afcs2021.csv")
+sale_price <- read.csv("sell_prices_afcs2021.csv")
+sample <- read.csv("sample_submission_afcs2021.csv")
+```
+
+## Checking missingness
+```{r}
+sum(is.na(train))
+sum(is.na(test))
+```
+
+## Number of products
+```{r}
+length(unique(train$id))
+```
+
+## Data transformation
+### Transpose function
+```{r}
+transpose <- function(df) {
+  tdf <- t(df)
+  col <- df[,1]
+  tdf <- as.data.frame(tdf[-1,]) 
+  colnames(tdf) <- col  
+  tdf <- as.data.frame(tdf)
+}
+```
+
+Transposing both train and test data to obtain data in desired format
+```{r}
+trainT <- transpose(train)
+trainT <- tibble::rownames_to_column(trainT, "d")
+
+testT <- transpose(test)
+testT <- tibble::rownames_to_column(testT, "d")
+```
+
+### Data type casting
+#### Changing character to numeric columns
+```{r}
+nm <- colnames(trainT)
+nm <- nm[-1]
+for(cols in nm){
+  trainT[,cols] <- as.numeric(trainT[,cols])
+}
+```
+
+### New column for total number of products sold
+```{r}
+trainT$total <- rowSums(trainT[,nm])
+```
+
+## Merging calendar and training set
+```{r}
+train_new <- merge(calendar, trainT, by = "d")
+sum(is.na(train_new))
+```
+
+### changing character dates to date type
+```{r}
+train_new$date <- mdy(train_new$date)
+```
+
+### Converting to tsibble object type
+```{r}
+train_ts <- train_new %>%
+  as_tsibble(
+    index = date
+    )
+```
+
+```{r}
+train_new %>%
+  select(year, month, event_name_1, event_type_1, event_name_2, event_type_2) %>%
+  mutate(
+    event = if_else((event_name_1 != "" | event_type_1 != "" | event_name_2 != "" | event_type_2 != ""), 1, 0)
+  ) %>%
+  group_by(year, month) %>%
+  summarise(event = sum(event)) %>%
+  filter(year==2011) %>%
+  ggplot(aes(x=month, y=event, group=year)) +
+  geom_line(aes(color=year)) +
+  scale_x_continuous(name = "x", breaks = c(1,2,3,4,5,6,7,8,9,10,11,12))
+  
+```
+
+## Plotting
+### Total product sold
+```{r}
+train_ts %>% 
+  filter(year(date)==2011) %>%
+  autoplot(total) +
+  labs(x="Year", y="Total number of products sold")
+```
+
+```{r}
+train_ts %>% gg_season(total)
+```
+
+
+### Plot for individual product
+```{r}
+train_ts %>% 
+  autoplot(FOODS_3_001_TX_3_validation) +
+  labs(x="Year", y="Total number of FOODS_3_001_TX_3_validation sold")
+
+train_ts %>% 
+  autoplot(FOODS_3_002_TX_3_validation) +
+  labs(x="Year", y="Total number of FOODS_3_002_TX_3_validation sold")
+
+train_ts %>% 
+  autoplot(FOODS_3_003_TX_3_validation) +
+  labs(x="Year", y="Total number of FOODS_3_003_TX_3_validation sold")
+
+train_ts %>% 
+  autoplot(FOODS_3_007_TX_3_validation) +
+  labs(x="Year", y="Total number of FOODS_3_007_TX_3_validation sold")
+```
+
+## Decomposition of the total number of products sold
+```{r}
+dcmp <- train_ts %>%
+  model(stl = STL(total))
+
+components(dcmp) %>% autoplot()
+```
+
+## Decomposition for specific product
+```{r}
+dcmp <- train_ts %>%
+  model(stl = STL(FOODS_3_002_TX_3_validation))
+
+components(dcmp) %>% autoplot()
+```
+
+```{r}
+evntwise_sale <- train_new %>%
+  select(year, event_type_1, total) %>%
+  #if_else(event_type_1 != "", event_type_1, "None") %>%
+  group_by(year, event_type_1) %>%
+  summarise(total=sum(total))
+
+evntwise_sale$event_type_1 <- ifelse(evntwise_sale$event_type_1=="","None",evntwise_sale$event_type_1)
+
+evntwise_sale %>%
+  ggplot(aes(x=year, y=total, fill=factor(event_type_1))) +
+  geom_line() +
+  facet_grid(vars(event_type_1), scales = "free_y")
+```
+
+```{r}
+evntwise_sale %>%
+  pivot_wider(values_from=total, names_from=event_type_1) %>%
+  GGally::ggpairs(2:6)
+```
+
+### Modelling
+```{r}
+fit <- train_ts %>% 
+  model(
+#    trend_model = TSLM(FOODS_3_001_TX_3_validation ~ trend()),
+#    MEAN = MEAN(FOODS_3_001_TX_3_validation),
+#    NAIVE = NAIVE(FOODS_3_001_TX_3_validation),
+#    SNAIVE = SNAIVE(FOODS_3_001_TX_3_validation),
+    Drift = RW(FOODS_3_001_TX_3_validation ~ drift())
+    )
+
+fit %>% accuracy()
+```
+
+```{r}
+fit %>% gg_tsresiduals()
+```
+
