@@ -88,6 +88,7 @@ train_ts <- train_new %>%
     )
 ```
 
+# Number of events, monthwise
 ```{r}
 train_new %>%
   select(year, month, event_name_1, event_type_1, event_name_2, event_type_2) %>%
@@ -96,10 +97,11 @@ train_new %>%
   ) %>%
   group_by(year, month) %>%
   summarise(event = sum(event)) %>%
-  filter(year==2011) %>%
+  filter(year==2012) %>%
   ggplot(aes(x=month, y=event, group=year)) +
   geom_line(aes(color=year)) +
-  scale_x_continuous(name = "x", breaks = c(1,2,3,4,5,6,7,8,9,10,11,12))
+  scale_x_continuous(name = "Months", breaks = c(1,2,3,4,5,6,7,8,9,10,11,12)) +
+  labs(y="Number of events")
   
 ```
 
@@ -107,13 +109,40 @@ train_new %>%
 ### Total product sold
 ```{r}
 train_ts %>% 
-  filter(year(date)==2011) %>%
+  filter(year(date)==2012) %>%
   autoplot(total) +
   labs(x="Year", y="Total number of products sold")
 ```
 
 ```{r}
 train_ts %>% gg_season(total)
+```
+
+```{r}
+wkdaysales <- train_new %>% 
+  select(weekday, month, year, total) %>%
+  group_by(year, month, weekday) %>%
+  summarise(total = sum(total)/1e05)
+
+ggplot(wkdaysales, aes(x=weekday, y=total)) + 
+  geom_bar(stat = "identity") +
+  labs(y="total sales (x 100000)")
+
+ggplot(wkdaysales, aes(x=month, y=total)) + 
+  geom_bar(stat = "identity") +
+  scale_x_continuous(name = "Months", breaks = c(1,2,3,4,5,6,7,8,9,10,11,12)) +
+  labs(y="total sales (x 100000)")
+
+ggplot(wkdaysales, aes(x=year, y=total)) + 
+  geom_bar(stat = "identity") +
+  labs(y="total sales (x 100000)")
+```
+
+```{r}
+wkdaysales <- train_new %>% 
+  select(weekday, month, year, total) %>%
+  group_by(year, month, weekday) %>%
+  summarise(total = sum(total)/1e05)
 ```
 
 
@@ -157,14 +186,29 @@ evntwise_sale <- train_new %>%
   select(year, event_type_1, total) %>%
   #if_else(event_type_1 != "", event_type_1, "None") %>%
   group_by(year, event_type_1) %>%
-  summarise(total=sum(total))
+  summarise(total=mean(total))
 
 evntwise_sale$event_type_1 <- ifelse(evntwise_sale$event_type_1=="","None",evntwise_sale$event_type_1)
 
 evntwise_sale %>%
   ggplot(aes(x=year, y=total, fill=factor(event_type_1))) +
   geom_line() +
-  facet_grid(vars(event_type_1), scales = "free_y")
+  facet_grid(vars(event_type_1), scales = "free_y") +
+  labs(y="Mean sales")
+```
+
+```{r}
+evntwise_sale <- train_new %>%
+  select(year, event_type_1, total) %>%
+  group_by(year, event_type_1) %>%
+  summarise(total=mean(total))
+
+evntwise_sale$event_type_1 <- ifelse(evntwise_sale$event_type_1=="","None",evntwise_sale$event_type_1)
+
+evntwise_sale %>%
+  ggplot(aes(x=event_type_1, y=total)) +
+  geom_bar(stat = "identity") +
+  labs(x="Holiday types", y="Mean sales")
 ```
 
 ```{r}
@@ -177,10 +221,10 @@ evntwise_sale %>%
 ```{r}
 fit <- train_ts %>% 
   model(
-#    trend_model = TSLM(FOODS_3_001_TX_3_validation ~ trend()),
-#    MEAN = MEAN(FOODS_3_001_TX_3_validation),
-#    NAIVE = NAIVE(FOODS_3_001_TX_3_validation),
-#    SNAIVE = SNAIVE(FOODS_3_001_TX_3_validation),
+    trend_model = TSLM(FOODS_3_001_TX_3_validation ~ trend()),
+    MEAN = MEAN(FOODS_3_001_TX_3_validation),
+    NAIVE = NAIVE(FOODS_3_001_TX_3_validation),
+    SNAIVE = SNAIVE(FOODS_3_001_TX_3_validation),
     Drift = RW(FOODS_3_001_TX_3_validation ~ drift())
     )
 
