@@ -1,0 +1,240 @@
+---
+title: "FinalProject"
+author: "Britt Roele"
+date: "12/5/2021"
+output: pdf_document
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(fpp3)
+library(dplyr)
+library(tsibble)
+library(lubridate)
+library(ggplot2)
+library(dtwclust)
+
+
+```
+
+# Data exploring
+
+```{r}
+#reading the data
+calendar <- read.csv("calendar_afcs2021.csv")
+train <- read.csv("sales_train_validation_afcs2021.csv")
+test <- read.csv("sales_test_validation_afcs2021.csv")
+sale_prices <- read.csv("sell_prices_afcs2021.csv")
+
+# Transpose function
+transpose <- function(df) {
+  tdf <- t(df)
+  col <- df[,1]
+  tdf <- as.data.frame(tdf[-1,]) 
+  colnames(tdf) <- col  
+  tdf <- as.data.frame(tdf)
+}
+
+# Transposing the train and test set to obtain data in the desired format
+trainT <- transpose(train);trainT
+#trainT <- tibble::rownames_to_column(trainT, "d")
+
+testT <- transpose(test)
+#testT <- tibble::rownames_to_column(testT, "d")
+
+# Make data numeric
+nm <- colnames(trainT)
+nm <- nm[-1]
+for(cols in nm){
+  trainT[,cols] <- as.numeric(trainT[,cols])
+}
+
+#get all columns that are of type factor
+factor_columns <- sapply(trainT, is.factor)
+
+#change them from type factor to numeric so the numeric data can be plotted 
+trainT[factor_columns] <- lapply(trainT[factor_columns], function(x) as.numeric(as.character(x))) 
+# add d to columns
+trainT <- tibble::rownames_to_column(trainT, "d")
+
+# Merge with calendar
+train_new <- merge(calendar, trainT, by = "d")
+
+# Only keep the date of the calendar dataframe into the new dataframe
+trainNew = subset(train_new, select = -c(wm_yr_wk,weekday, wday,month,year,event_name_1, event_type_1,event_name_2,event_type_2,snap_CA) )
+
+# Changing character date as date type
+trainNew$date <- mdy(trainNew$date)
+
+
+# Set d as index
+rownames(trainNew) <- trainNew$d
+trainNew <- subset(trainNew, select= -c(d))
+
+trainNew <- na.omit(trainNew)
+trainNew
+
+#get all columns that are of type factor
+factor_columns <- sapply(trainNew, is.factor)
+
+#change them from type factor to numeric so the numeric data can be plotted 
+trainNew[factor_columns] <- lapply(trainNew[factor_columns], function(x) as.numeric(as.character(x))) 
+```
+
+```{r}
+#prepare the data to be clustered (removing the date column)
+#cluster_data <- t(trainNew[(- ncol(trainNew)),]); cluster_data
+cluster_data <- subset(trainNew, select = -c(date)); cluster_data
+
+#save all the dates of the training data
+train_dates <- trainNew[1]; train_dates
+
+# transpose data so the products will be clusters instead of the dates
+cluster_data <- tibble::rownames_to_column(cluster_data, "d"); cluster_data
+cluster_data <- transpose(cluster_data);cluster_data
+
+
+clusters <- tsclust(cluster_data, type = "partitional", k = 10L, 
+              distance = "dtw_basic", centroid = "pam", 
+              seed = 3247L, trace = TRUE,
+              args = tsclust_args(dist = list(window.size = 10L)))
+
+#plotting the clusters 
+plot(clusters)
+```
+
+
+```{r}
+#saving the clusters 
+cluster <- clusters@cluster
+
+#add the corresponding cluster to the data 
+train_cluster_set <- cbind(cluster_data,cluster)
+
+# Make the different clusters as df
+cluster1 <- train_cluster_set %>% filter(cluster == 1)
+cluster2 <- train_cluster_set %>% filter(cluster == 2)
+cluster3 <- train_cluster_set %>% filter(cluster == 3)
+cluster4 <- train_cluster_set %>% filter(cluster == 4)
+cluster5 <- train_cluster_set %>% filter(cluster == 5)
+cluster6 <- train_cluster_set %>% filter(cluster == 6)
+cluster7 <- train_cluster_set %>% filter(cluster == 7)
+cluster8 <- train_cluster_set %>% filter(cluster == 8)
+cluster9 <- train_cluster_set %>% filter(cluster == 9)
+cluster10 <- train_cluster_set %>% filter(cluster == 10)
+
+# Merge calendar with cluster
+c1 <- tibble::rownames_to_column(cluster1, "Products")
+c1 <- transpose(c1)
+c1 <- tibble::rownames_to_column(c1, "d")
+test1 <- merge(c1, calendar, by = "d")
+test1
+
+# Merge calendar with cluster
+c2 <- tibble::rownames_to_column(cluster2, "Products")
+c2 <- transpose(c2)
+c2 <- tibble::rownames_to_column(c2, "d")
+test2 <- merge(c2, calendar, by = "d")
+test2
+
+# Merge calendar with cluster
+c3 <- tibble::rownames_to_column(cluster3, "Products")
+c3 <- transpose(c3)
+c3 <- tibble::rownames_to_column(c3, "d")
+test3 <- merge(c3, calendar, by = "d")
+test3
+
+# Merge calendar with cluster
+c4 <- tibble::rownames_to_column(cluster4, "Products")
+c4 <- transpose(c4)
+c4 <- tibble::rownames_to_column(c4, "d")
+test4 <- merge(c4, calendar, by = "d")
+test4
+
+# Merge calendar with cluster
+c5 <- tibble::rownames_to_column(cluster5, "Products")
+c5 <- transpose(c5)
+c5 <- tibble::rownames_to_column(c5, "d")
+test5 <- merge(c5, calendar, by = "d")
+test5
+
+# Merge calendar with cluster
+c6 <- tibble::rownames_to_column(cluster6, "Products")
+c6 <- transpose(c6)
+c6 <- tibble::rownames_to_column(c6, "d")
+test6 <- merge(c6, calendar, by = "d")
+test6
+
+# Merge calendar with cluster
+c7 <- tibble::rownames_to_column(cluster7, "Products")
+c7 <- transpose(c7)
+c7 <- tibble::rownames_to_column(c7, "d")
+test7 <- merge(c7, calendar, by = "d")
+test7
+
+# Merge calendar with cluster
+c8 <- tibble::rownames_to_column(cluster8, "Products")
+c8 <- transpose(c8)
+c8 <- tibble::rownames_to_column(c8, "d")
+test8 <- merge(c8, calendar, by = "d")
+test8
+
+# Merge calendar with cluster
+c9 <- tibble::rownames_to_column(cluster9, "Products")
+c9 <- transpose(c9)
+c9 <- tibble::rownames_to_column(c9, "d")
+test9 <- merge(c9, calendar, by = "d")
+test9
+
+# Merge calendar with cluster
+c10 <- tibble::rownames_to_column(cluster10, "Products")
+c10 <- transpose(c10)
+c10 <- tibble::rownames_to_column(c10, "d")
+test10 <- merge(c10, calendar, by = "d")
+test10
+
+```
+
+
+# Modelling
+```{r}
+
+
+test1 %>% group_by(year, month) %>% summarise
+
+
+
+
+
+
+
+train1_ts <- test1 %>%
+  as_tsibble(
+    index = date
+    )
+test1 %>% group_by(year, month) %>% summarise()
+
+test1 %>%
+  select(year, month, event_name_1, event_type_1, event_name_2, event_type_2) %>%
+  mutate(
+    event = if_else((event_name_1 != "" | event_type_1 != "" | event_name_2 != "" | event_type_2 != ""), 1, 0)
+  ) %>%
+  group_by(year, month) %>%
+  summarise(event = sum(event))
+
+fit <- test1 %>% 
+  model(
+#    trend_model = TSLM(FOODS_3_001_TX_3_validation ~ trend()),
+#    MEAN = MEAN(FOODS_3_001_TX_3_validation),
+#    NAIVE = NAIVE(FOODS_3_001_TX_3_validation),
+#    SNAIVE = SNAIVE(FOODS_3_001_TX_3_validation),
+    Drift = RW(FOODS_3_001_TX_3_validation ~ drift())
+    )
+
+fit %>% accuracy()
+```
+
+
