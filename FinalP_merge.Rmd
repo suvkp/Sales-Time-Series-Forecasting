@@ -205,14 +205,23 @@ test10
 
 
 # Modelling
-```{r}
 
-```
 
 # Cluster 1
 ```{r}
+# Get the number of events per month per year
+event1 <- test1 %>%
+  select(year, month, event_name_1, event_type_1, event_name_2, event_type_2) %>%
+  mutate(
+    event = if_else((event_name_1 != "" | event_type_1 != "" | event_name_2 != "" | event_type_2 != ""), 1, 0)
+  ) %>%
+  group_by(year, month) %>%
+  summarise(event = sum(event))
+
 # Keep certain columns
-NC1 <- subset(NC1, select=-c(month, year, group_id));NC1
+newC1 <- subset(test1, select = -c(date,wm_yr_wk,weekday,wday,event_name_1, event_type_1,event_name_2,event_type_2, snap_CA))
+NC1 <- merge(newC1, event1);NC1
+NC1 <- subset(NC1, select=-c(month, year, group_id))
 
 # Make an event data frame
 events <- subset(NC1, select=event);events
@@ -269,9 +278,211 @@ fit %>% accuracy()
 
 ```
 
+# Get the products of cluster 1
 Best model for cluster1 is ARIMA model.
 ```{r}
+# Get the products from cluster 1
+new <- transpose(NC1)
+products1 <- tibble::rownames_to_column(new, "Products")
+products1 <- products1['Products']; products1
 
+```
+
+# Cluster 2
+```{r}
+# Get the number of events per month per year
+event2 <- test2 %>%
+  select(year, month, event_name_1, event_type_1, event_name_2, event_type_2) %>%
+  mutate(
+    event = if_else((event_name_1 != "" | event_type_1 != "" | event_name_2 != "" | event_type_2 != ""), 1, 0)
+  ) %>%
+  group_by(year, month) %>%
+  summarise(event = sum(event))
+
+# Keep certain columns
+newC2 <- subset(test2, select = -c(date,wm_yr_wk,weekday,wday,event_name_1, event_type_1,event_name_2,event_type_2, snap_CA))
+NC2 <- merge(newC2, event2);NC2
+NC2 <- subset(NC2, select=-c(month, year, group_id))
+
+# Make an event data frame
+events <- subset(NC2, select=event);events
+events <- tibble::rownames_to_column(events, "d")
+
+# Keep only the products
+NC2 <- subset(NC2, select=-c(event))
+rownames(NC2) <- NC2$d
+NC2 <- subset(NC2, select = -c(d))
+
+#get all columns that are of type character
+factor_columns <- sapply(NC2, is.character)
+
+#change them from type factor to numeric so the numeric data can be plotted 
+NC2[factor_columns] <- lapply(NC2[factor_columns], function(x) as.numeric(as.character(x))) 
+
+# Get the mean of sales per day
+train2 <- NC2 %>% mutate('rowMean' = rowMeans(NC2))
+train2 <- subset(train2, select = rowMean)
+
+tr2 <- tibble::rownames_to_column(train2, "d")
+
+#get all columns that are of type character
+factor_columns <- sapply(tr2, is.character)
+
+#change them from type factor to numeric so the numeric data can be plotted 
+tr2[factor_columns] <- lapply(tr2[factor_columns], function(x) as.numeric(as.character(x)))
+
+# Add events to the rowMeans
+tr2 <- merge(tr2, events, by="d")
+
+# Make a tsibble of the data frame
+tr2 <- tr2 %>%
+  as_tsibble(
+    index = d
+    )
+
+# Plot
+tr2 %>% autoplot(rowMean)
+
+# Fit the training data
+fit2 <- tr2 %>% 
+  model(
+    trend_model = TSLM(rowMean ~ trend()),
+    MEAN = MEAN(rowMean),
+    NAIVE = NAIVE(rowMean),
+    SNAIVE = SNAIVE(rowMean),
+    Drift = RW(rowMean ~ drift()),
+    arima = ARIMA(rowMean)
+  )
+
+# Get the accuracy
+fit2 %>% accuracy()
+
+```
+For the second cluster ARIMA is also the best model.
+
+# Get the products of cluster 2
+Best model for cluster2 is ARIMA model.
+```{r}
+# Get the products from cluster 2
+new <- transpose(NC2)
+products2 <- tibble::rownames_to_column(new, "Products")
+products2 <- products2['Products']; products2
+
+```
+
+# Cluster 3
+```{r}
+# Get the number of events per month per year
+event3 <- test3 %>%
+  select(year, month, event_name_1, event_type_1, event_name_2, event_type_2) %>%
+  mutate(
+    event = if_else((event_name_1 != "" | event_type_1 != "" | event_name_2 != "" | event_type_2 != ""), 1, 0)
+  ) %>%
+  group_by(year, month) %>%
+  summarise(event = sum(event))
+
+# Keep certain columns
+newC3 <- subset(test3, select = -c(date,wm_yr_wk,weekday,wday,event_name_1, event_type_1,event_name_2,event_type_2, snap_CA))
+NC3 <- merge(newC3, event3)
+NC3 <- subset(NC3, select=-c(month, year, group_id))
+
+# Make an event data frame
+events3 <- subset(NC3, select=event)
+events3 <- tibble::rownames_to_column(events3, "d")
+
+# Keep only the products
+NC3 <- subset(NC3, select=-c(event))
+rownames(NC3) <- NC3$d
+NC3 <- subset(NC3, select = -c(d))
+
+#get all columns that are of type character
+factor_columns <- sapply(NC3, is.character)
+
+#change them from type factor to numeric so the numeric data can be plotted 
+NC3[factor_columns] <- lapply(NC3[factor_columns], function(x) as.numeric(as.character(x))) 
+
+# Get the mean of sales per day
+train3 <- NC3 %>% mutate('rowMean' = rowMeans(NC3))
+train3 <- subset(train3, select = rowMean)
+
+tr3 <- tibble::rownames_to_column(train3, "d")
+tr3
+#get all columns that are of type character
+#factor_columns <- sapply(tr3, is.character)
+
+#change them from type factor to numeric so the numeric data can be plotted 
+#tr3[factor_columns] <- lapply(tr3[factor_columns], function(x) as.numeric(as.character(x)))
+
+# Add events to the rowMeans
+tr3 <- merge(tr3, events3, by="d")
+tr3
+# Make a tsibble of the data frame
+tr3 <- tr3 %>%
+  as_tsibble(
+    index = d
+    )
+
+# Plot
+tr3 %>% autoplot(rowMean)
+
+# Fit the training data
+fit3 <- tr3 %>% 
+  model(
+    trend_model = TSLM(rowMean ~ trend()),
+    MEAN = MEAN(rowMean),
+    NAIVE = NAIVE(rowMean),
+    SNAIVE = SNAIVE(rowMean),
+    Drift = RW(rowMean ~ drift()),
+    arima = ARIMA(rowMean)
+  )
+
+# Get the accuracy
+fit3 %>% accuracy()
+
+```
+
+
+# Get the products of cluster 3
+Best model for cluster3 is ARIMA model.
+```{r}
+# Get the products from cluster 3
+new <- transpose(NC3)
+products3 <- tibble::rownames_to_column(new, "Products")
+
+products3 <- products3['Products']; products3
+
+```
+
+
+
+# TEST DOESN'T WORK YET
+
+
+```{r}
+trainNew
+
+for (i in nrow(products1)){
+  product <- products1[i,]
+  df <- trainNew[product]
+  df <- tibble::rownames_to_column(df, "d")
+  
+  # Get the id of the date
+  df<-mutate(df,d=as.character(d))
+  df<-mutate(df,d=sapply(strsplit(df$d, split='_', fixed=TRUE),function(x) (x[2])))
+  df<-mutate(df,d=as.numeric(d))
+  df
+
+  # Make a tsibble of the data frame
+  tr1 <- df %>%
+  as_tsibble(
+    index = d
+    )
+  tr1
+  
+  print(names(tr1)[2])
+  fit <- tr1 %>% model(RW(FOODS_3_607_TX_3_validation ~ drift()))
+  fit %>% forecast(h=28) %>% autoplot(df)
+}
 
 
 ```
