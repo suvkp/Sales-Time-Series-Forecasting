@@ -126,6 +126,11 @@ cluster8 <- train_cluster_set %>% filter(cluster == 8)
 cluster9 <- train_cluster_set %>% filter(cluster == 9)
 cluster10 <- train_cluster_set %>% filter(cluster == 10)
 
+# Give each month of the year an unique id
+calendar <- calendar %>%
+ group_by(year, month) %>%
+ mutate(group_id = cur_group_id())
+
 # Merge calendar with cluster
 c1 <- tibble::rownames_to_column(cluster1, "Products")
 c1 <- transpose(c1)
@@ -202,39 +207,73 @@ test10
 # Modelling
 ```{r}
 
+```
 
-test1 %>% group_by(year, month) %>% summarise
+# Cluster 1
+```{r}
+# Keep certain columns
+NC1 <- subset(NC1, select=-c(month, year, group_id));NC1
 
+# Make an event data frame
+events <- subset(NC1, select=event);events
+events <- tibble::rownames_to_column(events, "d")
 
+# Keep only the products
+NC1 <- subset(NC1, select=-c(event));NC1
+rownames(NC1) <- NC1$d
+NC1 <- subset(NC1, select = -c(d));NC1
 
+#get all columns that are of type character
+factor_columns <- sapply(NC1, is.character)
 
+#change them from type factor to numeric so the numeric data can be plotted 
+NC1[factor_columns] <- lapply(NC1[factor_columns], function(x) as.numeric(as.character(x))) 
 
+# Get the mean of sales per day
+train1 <- NC1 %>% mutate('rowMean' = rowMeans(NC1))
+train1 <- subset(train1, select = rowMean)
 
+tr1 <- tibble::rownames_to_column(train1, "d"); tr1
 
-train1_ts <- test1 %>%
+#get all columns that are of type character
+factor_columns <- sapply(tr1, is.character)
+
+#change them from type factor to numeric so the numeric data can be plotted 
+tr1[factor_columns] <- lapply(tr1[factor_columns], function(x) as.numeric(as.character(x)))
+
+# Add events to the rowMeans
+tr1 <- merge(tr1, events, by="d"); tr1
+
+# Make a tsibble of the data frame
+tr1 <- tr1 %>%
   as_tsibble(
-    index = date
+    index = d
     )
-test1 %>% group_by(year, month) %>% summarise()
 
-test1 %>%
-  select(year, month, event_name_1, event_type_1, event_name_2, event_type_2) %>%
-  mutate(
-    event = if_else((event_name_1 != "" | event_type_1 != "" | event_name_2 != "" | event_type_2 != ""), 1, 0)
-  ) %>%
-  group_by(year, month) %>%
-  summarise(event = sum(event))
+# Plot
+tr1 %>% autoplot(rowMean)
 
-fit <- test1 %>% 
+# Fit the training data
+fit <- tr1 %>% 
   model(
-#    trend_model = TSLM(FOODS_3_001_TX_3_validation ~ trend()),
-#    MEAN = MEAN(FOODS_3_001_TX_3_validation),
-#    NAIVE = NAIVE(FOODS_3_001_TX_3_validation),
-#    SNAIVE = SNAIVE(FOODS_3_001_TX_3_validation),
-    Drift = RW(FOODS_3_001_TX_3_validation ~ drift())
-    )
+    trend_model = TSLM(rowMean ~ trend()),
+    MEAN = MEAN(rowMean),
+    NAIVE = NAIVE(rowMean),
+    SNAIVE = SNAIVE(rowMean),
+    Drift = RW(rowMean ~ drift()),
+    arima = ARIMA(rowMean)
+  )
 
+# Get the accuracy
 fit %>% accuracy()
+
+```
+
+Best model for cluster1 is ARIMA model.
+```{r}
+
+
+
 ```
 
 
