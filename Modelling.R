@@ -2,13 +2,17 @@ library(lubridate)
 library(xgboost)
 library(caret)
 library(dplyr)
+library(reshape2)
+library(data.table)
 
+# --------- DATA LOAD -----------
 calendar <- read.csv("calendar_afcs2021.csv")
 train <- read.csv("sales_train_validation_afcs2021.csv")
 test <- read.csv("sales_test_validation_afcs2021.csv")
 sale_price <- read.csv("sell_prices_afcs2021.csv")
 sample <- read.csv("sample_submission_afcs2021.csv")
 
+# ----------- DATA PREPARATION --------------
 # Transposing
 transpose <- function(df) {
   tdf <- t(df)
@@ -23,22 +27,20 @@ trainT <- tibble::rownames_to_column(trainT, "d")
 testT <- transpose(test)
 testT <- tibble::rownames_to_column(testT, "d")
 
-# Typecasting
-trcolnm <- colnames(trainT)
-trcolnm <- trcolnm[-1]
-for(cols in trcolnm){
-  trainT[,cols] <- as.numeric(trainT[,cols])
-}
+# Melting the product id variables into records
+trainT <- melt(trainT, id.vars = "d")
+testT <- melt(testT, id.vars = "d")
 
-testcolnm <- colnames(testT)
-testcolnm <- testcolnm[-1]
-for(cols in testcolnm){
-  testT[,cols] <- as.numeric(testT[,cols])
-}
+# Generating unique numeric ID for each product
+train1 <- trainT %>% mutate(ID = group_indices_(trainT, .dots="variable")) %>% select(-c(variable))
+test1 <- testT %>% mutate(ID = group_indices_(testT, .dots="variable")) %>% select(-c(variable))
+
+# Keeping separate dataset with original and new ID
+oid <- trainT %>% mutate(ID = group_indices_(trainT, .dots="variable")) %>% select(-c(d, value)) %>% distinct()
 
 # Merging with calendar data
-train2 <- merge(calendar, trainT, by = "d")
-test2 <- merge(calendar, testT, by = "d")
+train2 <- merge(calendar, train1, by = "d")
+test2 <- merge(calendar, test1, by = "d")
 
 # Typecasting dates
 train2$date <- mdy(train2$date)
@@ -68,109 +70,52 @@ test2 <- test2 %>% dplyr::mutate(
 train3 <- train2 %>% dplyr::select(-c(d, wm_yr_wk, date, weekday, event_name_1, event_name_2, event_type_1, event_type_2))
 test3 <- test2 %>% dplyr::select(-c(d, wm_yr_wk, date, weekday, event_name_1, event_name_2, event_type_1, event_type_2))
 
-X <- train3 %>% dplyr::select(c(day, month, year, wday, event, snap_CA))
-y <- train3 %>% dplyr::select(-c(day, month, year, wday, event, snap_CA))
-tst <- test3 %>% dplyr::select(c(day, month, year, wday, event, snap_CA))
+# Type-casting to 'value' to numeric columns
+train3$value <- as.numeric(train3$value)
+test3$value <- as.numeric(test3$value)
 
-# Defining start time
-start.time <- Sys.time()
+# ------- MODELLING ---------
 
-for(c in colnames(y)) {
-  
-  # train features, train labels and test set
-  X_train <- as.matrix(X)
-  y_train <- y[[c]]
-  X_test <- as.matrix(tst)
-  
-  # Defining CV parameters
-  xgb_trcontrol <- caret::trainControl(
-    method = "cv", 
-    number = 5,
-    allowParallel = TRUE, 
-    verboseIter = FALSE, 
-    returnData = FALSE
-  )
-  
-  # Defining hyper parameters
-  xgb_grid <- base::expand.grid(
-    list(
-      nrounds = c(100, 200),
-      max_depth = c(10, 15, 20), # maximum depth of a tree
-      colsample_bytree = seq(0.5), # subsample ratio of columns when construction each tree
-      eta = 0.1, # learning rate
-      gamma = 0, # minimum loss reduction
-      min_child_weight = 1,  # minimum sum of instance weight (hessian) needed ina child
-      subsample = 1 # subsample ratio of the training instances
-    ))
-  
-  # Model trainings
-  xgb_model <- caret::train(
-    X_train, y_train,
-    trControl = xgb_trcontrol,
-    tuneGrid = xgb_grid,
-    method = "xgbTree",
-    nthread = 1
-  )
-  
-}
+X <- train3 %>% dplyr::arrange(ID) %>% dplyr::select(-c(value))
+y <- train3 %>% dplyr::arrange(ID) %>% dplyr::select(c(value))
+tst <- test3 %>% dplyr::select(-c(value)) %>% dplyr::arrange(ID)
 
-# End time recording
-end.time <- Sys.time()
-time.taken <- round(end.time - start.time,2)
-time.taken
-
-
-# ******* Test for one product ********
 X_train <- as.matrix(X)
-y_train <- y[['FOODS_3_001_TX_3_validation']] # as.matrix(y)
-X_test <- as.matrix(tst) # xgboost::xgb.DMatrix(as.matrix(tst))
+y_train <- y$value
+X_test <- as.matrix(tst)
 
-xgb_trcontrol <- caret::trainControl(
-  method = "cv", 
-  number = 5,
-  allowParallel = TRUE, 
-  verboseIter = FALSE, 
-  returnData = FALSE
+set.seed(123)
+
+# ------- TRAINING ---------
+xgb_model <- xgboost(data = X_train, 
+        label = y_train, 
+        eta = 0.1,
+        max_depth = 10, 
+        nround=1000, 
+        eval_metric = "rmse",
+        objective = "reg:squarederror",
+        nthread = 3
 )
 
-xgb_grid <- base::expand.grid(
-  list(
-    nrounds = c(100, 200),
-    max_depth = c(10, 15, 20), # maximum depth of a tree
-    colsample_bytree = seq(0.5), # subsample ratio of columns when construction each tree
-    eta = 0.1, # learning rate
-    gamma = 0, # minimum loss reduction
-    min_child_weight = 1,  # minimum sum of instance weight (hessian) needed ina child
-    subsample = 1 # subsample ratio of the training instances
-  ))
+# -------- PREDICTION ----------
+predval <- predict(xgb_model, newdata = X_test)
+prod_pred <- cbind(tst$ID, predval)
+prod_pred <- data.frame(prod_pred)
+colnames(prod_pred) <- c('ID', 'predval')
 
-xgb_model <- caret::train(
-  X_train, y_train,
-  trControl = xgb_trcontrol,
-  tuneGrid = xgb_grid,
-  method = "xgbTree",
-  nthread = 1
-)
+preddf <- merge(prod_pred, oid, by = 'ID')
 
-# Checking model parameters
-xgb_model$bestTune
+preddf <- preddf %>% group_by(variable) %>% dplyr::mutate(forecast = row_number())
 
-# Prediction
-xgb_pred <- xgb_model %>% stats::predict(X_test)
+output <- preddf %>% tidyr::spread(forecast, predval)
+output <- output %>% select(-ID) 
+colnames(output) <- c('id','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
+                      'F13','F14','F15','F16','F17','F18','F19','F20','F21','F22','F23','F24','F25','F26','F27','F28')
+
+# --------- FINAL DATASET -----------
+
+write.csv(output, 'output.csv')
 
 # RMSE calculation
-m <- test3 %>% dplyr::select(-c(day, month, year, wday, event, snap_CA))
-RMSE(xgb_pred, m$FOODS_3_718_TX_3_validation)
-
-
-
-
-
-
-
-
-
-
-
-
-
+# m <- test3 %>% dplyr::select(-c(day, month, year, wday, event, snap_CA)) %>% dplyr::arrange(ID)
+# RMSE(predval, m$value)
