@@ -76,9 +76,9 @@ test3$value <- as.numeric(test3$value)
 
 # ------- MODELLING ---------
 
-X_trn <- train3 %>% dplyr::arrange(ID) %>% dplyr::select(-c(value, ID))
+X_trn <- train3 %>% dplyr::arrange(ID) %>% dplyr::select(-c(value))
 y_trn <- train3 %>% dplyr::arrange(ID) %>% dplyr::select(c(value))
-X_tst <- test3 %>% dplyr::arrange(ID) %>% dplyr::select(-c(value, ID))
+X_tst <- test3 %>% dplyr::select(-c(value)) %>% dplyr::arrange(ID)
 y_tst <- test3 %>% dplyr::arrange(ID) %>% dplyr::select(c(value))
 
 X_train <- as.matrix(X_trn)
@@ -86,48 +86,65 @@ y_train <- y_trn$value
 X_test <- as.matrix(X_tst)
 y_test <- y_tst$value
 
-# ------- TRAINING ---------
-set.seed(123)
+# preparing matrix
+dtrain <- xgb.DMatrix(data=X_train, label=y_train) 
+dtest <- xgb.DMatrix(data=X_test, label=y_test)
 
-xgb_model <- xgboost(data = X_train, 
-        label = y_train, 
-        eta = 0.1,
-        max_depth = 10, 
-        nround=1000, 
-        eval_metric = "rmse",
-        objective = "reg:squarederror",
-        nthread = 3
-)
+# default parameters
+params <- list(booster = "gbtree", objective = "reg:squarederror", eta=0.3, gamma=0, 
+               max_depth=6, min_child_weight=1, subsample=1, colsample_bytree=1)
 
-importanceRaw <- xgb.importance(feature_names = colnames(X_trn), model = xgb_model)
+# cross-validation using above mentioned parameters
+xgbcv <- xgb.cv(params = params, data = dtrain, nrounds = 200, nfold = 5, showsd = T, 
+                stratified = T, print.every.n = 10, early.stop.round = 20, maximize = F)
 
-xgb.plot.importance(importance_matrix = importanceRaw)
+# CV metrics
+min(xgbcv$test.error.mean)
+xgbcv$best_iteration
+xgbcv$best_ntreelimit
+xgbcv$evaluation_log 
+
+# Training with default parameters
+xgb1 <- xgb.train (params = params, data = dtrain, nrounds = 200, watchlist = list(val=dtest,train=dtrain), 
+                   print.every.n = 10, early.stop.round = 10, maximize = F , eval_metric = "rmse")
+
+# ---------- HYPERPARAMETER TUNING USING RANDOM SEARCH -----------
+library(mlr)
+
+# Task creation
+traintask <- makeRegrTask(data = train3, target = "value")
+testtask <- makeRegrTask(data = test3, target = "value")
+
+#create learner
+lrn <- makeLearner("regr.xgboost",predict.type = "response")
+lrn$par.vals <- list( objective="reg:squarederror", eval_metric="rmse", nrounds=100L)
+
+#set parameter space
+params <- makeParamSet( makeDiscreteParam("booster", values = c("gbtree","gblinear")), 
+                        makeIntegerParam("max_depth",lower = 3L,upper = 10L), 
+                        makeNumericParam("min_child_weight",lower = 1L,upper = 10L), 
+                        makeNumericParam("subsample",lower = 0.5,upper = 1), 
+                        makeNumericParam("colsample_bytree",lower = 0.5,upper = 1),
+                        makeNumericParam("eta",lower = .01,upper = 1L))
 
 
-RMSE(predval, y_test)
+#set resampling strategy
+rdesc <- makeResampleDesc("CV",stratify = F,iters=10L)
 
-# -------- PREDICTION ----------
-predval <- predict(xgb_model,X_test)
+# Random search with 10 different XGB models
+ctrl <- makeTuneControlRandom(maxit = 20L)
 
-temp <- test3 %>% dplyr::arrange(ID) 
+#set parallel backend
+library(parallel)
+library(parallelMap) 
+parallelStartSocket(cpus = detectCores())
 
-prod_pred <- cbind(temp$ID, predval)
-prod_pred <- data.frame(prod_pred)
-colnames(prod_pred) <- c('ID', 'predval')
+#parameter tuning
+mytune <- tuneParams(learner = lrn, task = traintask, resampling = rdesc, measures = rmse, 
+                     par.set = params, control = ctrl, show.info = T)
 
-preddf <- merge(prod_pred, oid, by = 'ID')
+#set hyperparameters
+lrn_tune <- setHyperPars(lrn, par.vals = mytune$x)
 
-preddf <- preddf %>% group_by(variable) %>% dplyr::mutate(forecast = row_number())
-
-output <- preddf %>% tidyr::spread(forecast, predval)
-output <- output %>% select(-ID) 
-colnames(output) <- c('id','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12',
-                      'F13','F14','F15','F16','F17','F18','F19','F20','F21','F22','F23','F24','F25','F26','F27','F28')
-
-# --------- FINAL DATASET -----------
-
-write.csv(output, 'output.csv')
-
-# RMSE calculation
-# m <- test3 %>% dplyr::select(-c(day, month, year, wday, event, snap_CA)) %>% dplyr::arrange(ID)
-# RMSE(predval, m$value)
+#train model
+xgmodel <- train(learner = lrn_tune,task = traintask)
